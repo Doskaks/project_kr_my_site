@@ -1,0 +1,23 @@
+=== СТАТУС FILEBEAT ===
+● filebeat.service - Filebeat sends log files to Logstash or directly to Elasticsearch.
+     Loaded: loaded (/lib/systemd/system/filebeat.service; enabled; vendor preset: enabled)
+     Active: active (running) since Mon 2026-02-16 15:56:26 UTC; 54min ago
+       Docs: https://www.elastic.co/beats/filebeat
+   Main PID: 599 (filebeat)
+      Tasks: 8 (limit: 2305)
+     Memory: 131.3M
+        CPU: 3.673s
+     CGroup: /system.slice/filebeat.service
+             └─599 /usr/share/filebeat/bin/filebeat --environment systemd -c /etc/filebeat/filebeat.yml --path.home /usr/share/filebeat --path.config /etc/filebeat --path.data /var/lib/filebeat --path.logs /var/log/filebeat
+
+=== ТЕСТ СОЕДИНЕНИЯ С ES ===
+elasticsearch: http://10.0.1.33:9200...
+  parse url... OK
+  connection...
+    parse host... OK
+    dns lookup... OK
+    addresses: 10.0.1.33
+    dial up... OK
+  TLS... WARN secure connection disabled
+  talk to server... OK
+  version: 7.17.13
