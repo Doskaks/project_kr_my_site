@@ -1,0 +1,21 @@
+[server]
+http_port = {{ grafana_port }}
+domain = localhost
+root_url = %(protocol)s://%(domain)s:%(http_port)s/
+
+[database]
+type = sqlite3
+
+[security]
+admin_user = {{ grafana_admin_username | default('admin') }}
+admin_password = {{ grafana_admin_password | default('admin') }}
+
+[auth]
+disable_login_form = false
+
+[users]
+allow_sign_up = false
+
+[analytics]
+reporting_enabled = false
+check_for_updates = false

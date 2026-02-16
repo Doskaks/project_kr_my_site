@@ -1,0 +1,178 @@
+---
+- name: Установка и настройка nginx-log-exporter (рабочая версия)
+  hosts: webservers
+  become: yes
+  vars:
+    exporter_version: "1.9.0"
+    exporter_port: 4040
+    nginx_access_log: "/var/log/nginx/access.log"
+
+  tasks:
+    - name: Остановить старые сервисы
+      shell: |
+        systemctl stop nginx-log-exporter 2>/dev/null || true
+        pkill -f prometheus-nginxlog-exporter 2>/dev/null || true
+        sleep 2
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Скачать архив экспортера
+      get_url:
+        url: "https://github.com/martin-helmich/prometheus-nginxlog-exporter/releases/download/v{{ exporter_version }}/prometheus-nginxlog-exporter_{{ exporter_version }}_linux_amd64.tar.gz"
+        dest: /tmp/nginx-log-exporter.tar.gz
+        timeout: 30
+
+    - name: Распаковать архив
+      unarchive:
+        src: /tmp/nginx-log-exporter.tar.gz
+        dest: /tmp/
+        remote_src: yes
+        creates: /tmp/prometheus-nginxlog-exporter
+
+    - name: Скопировать бинарник в /usr/local/bin
+      copy:
+        src: /tmp/prometheus-nginxlog-exporter
+        dest: /usr/local/bin/prometheus-nginxlog-exporter
+        remote_src: yes
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Создать пользователя nginx-exporter
+      user:
+        name: nginx-exporter
+        system: yes
+        shell: /bin/false
+        create_home: no
+
+    - name: Добавить пользователя в группу adm (для чтения логов)
+      user:
+        name: nginx-exporter
+        groups: adm
+        append: yes
+
+    - name: Убедиться, что лог-файл Nginx существует и доступен
+      file:
+        path: "{{ nginx_access_log }}"
+        state: touch
+        owner: www-data
+        group: adm
+        mode: '0640'
+      changed_when: false
+
+    - name: Создать конфигурационный файл экспортера
+      copy:
+        content: |
+          listen:
+            port: {{ exporter_port }}
+            address: "0.0.0.0"
+
+          namespaces:
+            - name: nginx
+              source:
+                files:
+                  - {{ nginx_access_log }}
+              format: '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"'
+              labels:
+                host: "{{ ansible_hostname }}"
+        dest: /etc/nginx-exporter.yml
+        owner: nginx-exporter
+        group: nginx-exporter
+        mode: '0644'
+
+    - name: Создать systemd unit-файл
+      copy:
+        content: |
+          [Unit]
+          Description=Prometheus Nginx Log Exporter
+          After=network.target nginx.service
+          Wants=nginx.service
+
+          [Service]
+          Type=simple
+          User=nginx-exporter
+          Group=nginx-exporter
+          # ВАЖНО: используем -config-file, а не -config
+          ExecStart=/usr/local/bin/prometheus-nginxlog-exporter -config-file /etc/nginx-exporter.yml
+          Restart=always
+          RestartSec=10
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/nginx-log-exporter.service
+
+    - name: Перезагрузить systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Запустить и включить сервис
+      systemd:
+        name: nginx-log-exporter
+        state: started
+        enabled: yes
+
+    - name: Подождать 5 секунд для инициализации
+      wait_for:
+        timeout: 5
+      delegate_to: localhost
+
+    - name: Проверить статус сервиса
+      command: systemctl status nginx-log-exporter --no-pager -l
+      register: service_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Вывести статус сервиса
+      debug:
+        var: service_status.stdout_lines
+
+    - name: Проверить, что порт {{ exporter_port }} слушается
+      shell: ss -tlnp | grep :{{ exporter_port }} || echo "Порт не слушает"
+      register: port_check
+      changed_when: false
+
+    - name: Вывести информацию о порте
+      debug:
+        var: port_check.stdout
+
+    - name: Получить логи сервиса (последние 20 строк)
+      shell: journalctl -u nginx-log-exporter -n 20 --no-pager
+      register: service_logs
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Показать логи сервиса
+      debug:
+        var: service_logs.stdout_lines
+
+    - name: Проверить доступность метрик
+      uri:
+        url: "http://localhost:{{ exporter_port }}/metrics"
+        method: GET
+        status_code: 200
+      register: metrics_check
+      ignore_errors: yes
+      timeout: 5
+
+    - name: Вывести результат проверки метрик
+      debug:
+        msg: |
+          {% if metrics_check.status == 200 %}
+            ✅ Экспортер работает, метрики доступны
+            {% if metrics_check.content is defined %}
+            Пример метрик:
+            {{ metrics_check.content.split('\n')[:5] | join('\n') }}
+            {% else %}
+            (метрики получены, но content недоступен – возможно, ответ пустой)
+            {% endif %}
+          {% else %}
+            ❌ Экспортер не отвечает на порту {{ exporter_port }}
+            Код ответа: {{ metrics_check.status | default('нет ответа') }}
+          {% endif %}
+
+    - name: Очистка временных файлов
+      file:
+        path: /tmp/nginx-log-exporter.tar.gz
+        state: absent

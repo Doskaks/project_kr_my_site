@@ -1,0 +1,83 @@
+---
+- name: Управление Nginx
+  hosts: webservers
+  become: yes  # Добавляем become на уровне playbook
+  
+  tasks:
+    - name: Проверить установлен ли Nginx
+      command: which nginx
+      register: nginx_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Обновить apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: nginx_check.rc != 0
+
+    - name: Установить Nginx если не установлен
+      apt:
+        name: nginx
+        state: present
+      when: nginx_check.rc != 0
+
+    - name: Создать директорию /var/www/html если не существует
+      file:
+        path: /var/www/html
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+
+    - name: Создать тестовую страницу
+      copy:
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>My Site - {{ inventory_hostname }}</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; margin: 40px;">
+              <h1>Hello from {{ inventory_hostname }}</h1>
+              <p>Server IP: {{ ansible_default_ipv4.address }}</p>
+              <p>Status: <strong style="color: green;">RUNNING</strong></p>
+              <hr>
+              <p>Time: {{ ansible_date_time.time }}</p>
+          </body>
+          </html>
+        dest: /var/www/html/index.html
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+    - name: Создать health check endpoint
+      copy:
+        content: '{"status": "ok", "host": "{{ inventory_hostname }}", "ip": "{{ ansible_default_ipv4.address }}", "time": "{{ ansible_date_time.iso8601 }}"}'
+        dest: /var/www/html/health
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+    - name: Запустить Nginx сервис
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Проверить статус Nginx
+      shell: |
+        systemctl is-active nginx && echo "active" || echo "inactive"
+      register: nginx_status
+      changed_when: false
+
+    - name: Проверить доступность Nginx
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" http://localhost/health || echo "000"
+      register: nginx_http_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Показать статус Nginx
+      debug:
+        msg: "Nginx сервис: {{ nginx_status.stdout }}, HTTP статус: {{ nginx_http_status.stdout }}"

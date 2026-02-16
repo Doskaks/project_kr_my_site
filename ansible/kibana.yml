@@ -1,0 +1,53 @@
+---
+- name: Управление Kibana в Docker
+  hosts: kibana
+  tasks:
+    - name: Проверить установлен ли Docker
+      command: which docker
+      register: docker_check
+      ignore_errors: yes
+
+    - name: Установить Docker если не установлен
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+      become: yes
+      when: docker_check.rc != 0
+
+    - name: Запустить Docker сервис
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      become: yes
+
+    - name: Остановить контейнер Kibana если запущен
+      shell: |
+        sudo docker stop kibana 2>/dev/null || true
+        sudo docker rm kibana 2>/dev/null || true
+      args:
+        warn: false
+
+    - name: Запустить Kibana в Docker
+      shell: |
+        sudo docker run -d \
+          --name kibana \
+          --restart unless-stopped \
+          -p 5601:5601 \
+          -e "ELASTICSEARCH_HOSTS=http://10.0.1.33:9200" \
+          kibana:7.17.13
+      args:
+        warn: false
+
+    - name: Проверить запуск Kibana
+      shell: |
+        sleep 15
+        curl -s -o /dev/null -w "%{http_code}" http://localhost:5601 || echo "000"
+      register: kibana_status
+      args:
+        warn: false
+
+    - name: Показать статус Kibana
+      debug:
+        msg: "Kibana HTTP статус: {{ kibana_status.stdout }} (302 - нормально)"

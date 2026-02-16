@@ -1,0 +1,19 @@
+---
+- name: развертывание всей инфраструктуры
+  hosts: all
+  gather_facts: yes
+
+# Мониторинг
+- import_playbook: node-exporter.yml
+- import_playbook: prometheus.yml
+- import_playbook: prometheus-configure.yml
+- import_playbook: grafana.yml
+
+# Nginx
+- import_playbook: nginx.yml
+- import_playbook: nginx-log-exporter.yml
+
+# Логирование
+- import_playbook: elasticsearch.yml
+- import_playbook: kibana.yml
+- import_playbook: filebeat.yml

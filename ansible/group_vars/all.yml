@@ -1,0 +1,17 @@
+# Node Exporter
+node_exporter_version: "1.7.0"
+node_exporter_port: 9100
+
+# Nginx Log Exporter
+nginx_log_exporter_version: "1.9.0"
+nginx_log_exporter_port: 9200
+
+# Prometheus
+prometheus_version: "2.51.0"
+prometheus_port: 9090
+
+# Grafana
+grafana_version: "10.4.2"
+grafana_port: 3000
+grafana_admin_username: admin
+grafana_admin_password: "secure_password_here"

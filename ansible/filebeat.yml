@@ -1,0 +1,57 @@
+---
+- name: Исправить Filebeat – включить модуль nginx и настроить отправку в ES
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Добавить секцию filebeat.config.modules (если отсутствует)
+      blockinfile:
+        path: /etc/filebeat/filebeat.yml
+        marker: "# {mark} ANSIBLE MANAGED MODULES CONFIG"
+        block: |
+          filebeat.config.modules:
+            path: ${path.config}/modules.d/*.yml
+            reload.enabled: false
+        insertafter: EOF
+        create: no
+
+    - name: Включить модуль nginx
+      command: filebeat modules enable nginx
+
+    - name: Создать конфиг модуля nginx с правильными путями
+      copy:
+        dest: /etc/filebeat/modules.d/nginx.yml
+        content: |
+          - module: nginx
+            access:
+              enabled: true
+              var.paths: ["/var/log/nginx/access.log*"]
+            error:
+              enabled: true
+              var.paths: ["/var/log/nginx/error.log*"]
+            ingress_controller:
+              enabled: false
+        mode: '0644'
+
+    - name: Перезапустить Filebeat
+      systemd:
+        name: filebeat
+        state: restarted
+        daemon_reload: yes
+
+    - name: Подождать 10 секунд
+      wait_for:
+        timeout: 10
+      delegate_to: localhost
+
+    - name: Проверить статус Filebeat
+      command: systemctl status filebeat --no-pager -l
+      register: status
+    - debug: var=status.stdout_lines
+
+    - name: Проверить, создались ли индексы в Elasticsearch
+      shell: curl -s http://10.0.1.33:9200/_cat/indices | grep filebeat-nginx
+      register: indices
+      ignore_errors: yes
+      run_once: true
+      delegate_to: localhost
+    - debug: var=indices.stdout_lines

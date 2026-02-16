@@ -1,0 +1,143 @@
+---
+- name: Install Prometheus on monitoring server
+  hosts: prometheus
+  become: true
+  vars:
+    prometheus_version: "2.51.0"
+    prometheus_port: 9090
+    
+  tasks:
+    - name: Create Prometheus system user
+      user:
+        name: prometheus
+        system: true
+        shell: /sbin/nologin
+        create_home: false
+        
+    - name: Create directories for Prometheus
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: prometheus
+        group: prometheus
+      loop:
+        - /etc/prometheus
+        - /var/lib/prometheus
+        
+    - name: Download Prometheus
+      get_url:
+        url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: /tmp/prometheus.tar.gz
+        
+    - name: Extract Prometheus
+      unarchive:
+        src: /tmp/prometheus.tar.gz
+        dest: /tmp
+        remote_src: true
+        
+    - name: Install Prometheus binaries
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+        dest: /usr/local/bin/{{ item }}
+        owner: prometheus
+        group: prometheus
+        mode: '0755'
+        remote_src: true
+      loop:
+        - prometheus
+        - promtool
+        
+    - name: Install Prometheus config files
+      copy:
+        src: "/tmp/prometheus-{{ prometheus_version }}.linux-amd64/{{ item }}"
+        dest: /etc/prometheus/{{ item }}
+        owner: prometheus
+        group: prometheus
+        remote_src: true
+      loop:
+        - consoles
+        - console_libraries
+        
+    - name: Configure Prometheus
+      copy:
+        content: |
+          global:
+            scrape_interval: 15s
+            evaluation_interval: 15s
+
+          alerting:
+            alertmanagers:
+              - static_configs:
+                  - targets: []
+
+          rule_files:
+            - "rules/*.yml"
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+
+            - job_name: 'node'
+              static_configs:
+                - targets: 
+                  - '10.0.1.13:9100'  # web-a
+                  - '10.0.2.30:9100'  # web-b
+                  - '10.0.1.19:9100'  # prometheus
+                  - '10.0.3.34:9100'  # grafana
+                  - '10.0.1.33:9100'  # elasticsearch
+                  - '10.0.3.19:9100'  # kibana
+
+            - job_name: 'nginx'
+              static_configs:
+                - targets:
+                  - '10.0.1.13:9113'  # nginx-exporter web-a
+                  - '10.0.2.30:9113'  # nginx-exporter web-b
+        dest: /etc/prometheus/prometheus.yml
+        owner: prometheus
+        group: prometheus
+        mode: '0644'
+        
+    - name: Create systemd service for Prometheus
+      copy:
+        content: |
+          [Unit]
+          Description=Prometheus
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=prometheus
+          Group=prometheus
+          Type=simple
+          ExecStart=/usr/local/bin/prometheus \
+            --config.file /etc/prometheus/prometheus.yml \
+            --storage.tsdb.path /var/lib/prometheus/ \
+            --web.console.templates=/etc/prometheus/consoles \
+            --web.console.libraries=/etc/prometheus/console_libraries \
+            --web.listen-address=:{{ prometheus_port }}
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/prometheus.service
+        owner: root
+        group: root
+        mode: '0644'
+        
+    - name: Enable and start Prometheus
+      systemd:
+        name: prometheus
+        enabled: true
+        state: started
+        daemon_reload: true
+        
+    - name: Check Prometheus status
+      shell: |
+        sleep 5
+        curl -s http://localhost:9090/-/healthy || echo "Starting..."
+      register: prometheus_check
+      
+    - name: Show Prometheus status
+      debug:
+        msg: "Prometheus status: {{ prometheus_check.stdout }}"

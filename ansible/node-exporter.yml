@@ -1,0 +1,59 @@
+---
+- name: Install Node Exporter on all servers
+  hosts: webservers,prometheus,grafana,elasticsearch,kibana,bastion
+  become: true
+  vars:
+    node_exporter_version: "1.7.0"
+    node_exporter_port: 9100
+    
+  tasks:
+    - name: Create node_exporter user
+      user:
+        name: node_exporter
+        system: true
+        shell: /sbin/nologin
+        create_home: false
+        
+    - name: Download Node Exporter
+      get_url:
+        url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+        dest: /tmp/node_exporter.tar.gz
+        checksum: "sha256:https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/sha256sums.txt"
+        
+    - name: Extract Node Exporter
+      unarchive:
+        src: /tmp/node_exporter.tar.gz
+        dest: /tmp
+        remote_src: true
+        
+    - name: Install Node Exporter binary
+      copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: /usr/local/bin/node_exporter
+        owner: node_exporter
+        group: node_exporter
+        mode: '0755'
+        remote_src: yes
+        
+    - name: Create systemd service for Node Exporter
+      template:
+        src: templates/node-exporter.service.j2
+        dest: /etc/systemd/system/node-exporter.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify:
+        - restart node exporter
+        
+    - name: Enable and start Node Exporter
+      systemd:
+        name: node-exporter
+        enabled: true
+        state: started
+        daemon_reload: true
+        
+  handlers:
+    - name: restart node exporter
+      systemd:
+        name: node-exporter
+        state: restarted

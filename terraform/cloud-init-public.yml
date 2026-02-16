@@ -1,0 +1,24 @@
+#cloud-config
+users:
+  - name: nikolaym
+    groups: sudo
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    ssh-authorized-keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIClfzbNrk7UfkUHjVAG0K4OE1lIcZbl+XlarTKbiUbIa vagrant@rmq01
+
+# Включаем SSH
+ssh_pwauth: false
+manage_etc_hosts: true
+
+# Устанавливаем SSH сервер и базовые пакеты
+packages:
+  - openssh-server
+  - curl
+  - wget
+  - software-properties-common
+
+# Настройка SSH
+runcmd:
+  - systemctl enable ssh
+  - systemctl start ssh
